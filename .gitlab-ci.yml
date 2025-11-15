@@ -1,0 +1,57 @@
+image: python:3.11-slim
+
+variables:
+  POSTGRES_DB: app_test
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  DATABASE_URL: "postgres://postgres:postgres@postgres:5432/app_test"
+  DJANGO_SETTINGS_MODULE: "core.settings.dev"
+
+services:
+  - postgres:15-alpine
+
+before_script:
+  - apt-get update -qq && apt-get install -y -qq postgresql-client gcc
+  - pip install --upgrade pip
+  - pip install -r requirements.txt
+  - pip install -r requirements-dev.txt
+
+stages:
+  - lint
+  - test
+
+lint:
+  stage: lint
+  script:
+    - echo "Running ruff linter..."
+    - ruff check .
+    - echo "Running black formatter check..."
+    - black --check .
+  only:
+    - merge_requests
+    - main
+    - develop
+
+test:
+  stage: test
+  script:
+    - echo "Waiting for PostgreSQL to be ready..."
+    - until pg_isready -h postgres -U postgres; do sleep 1; done
+    - echo "Running migrations..."
+    - python manage.py migrate --noinput
+    - echo "Running tests with coverage..."
+    - pytest --cov=api --cov=health --cov-report=term --cov-report=xml --cov-report=html --cov-fail-under=65
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    paths:
+      - htmlcov/
+    expire_in: 1 week
+  only:
+    - merge_requests
+    - main
+    - develop
+
